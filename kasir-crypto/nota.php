@@ -93,7 +93,8 @@ if ($id > 0) {
             color: var(--neon-blue);
         }
 
-        .print-btn {
+        .print-btn,
+        .back-btn {
             display: block;
             margin: 2rem auto 0;
             padding: 0.6rem 1.2rem;
@@ -104,13 +105,15 @@ if ($id > 0) {
             transition: all 0.2s;
         }
 
-        .print-btn:hover {
+        .print-btn:hover,
+        .back-btn:hover {
             background: var(--neon-blue);
             color: var(--dark-bg);
         }
 
         @media print {
-            .print-btn {
+            .print-btn,
+            .back-btn {
                 display: none;
             }
             body {
@@ -162,6 +165,7 @@ if ($id > 0) {
 </div>
 
 <button class="print-btn" onclick="window.print()">Print Receipt</button>
+<button class="back-btn" onclick="window.location.href='index.php'">Back to List</button>
 
 </body>
 </html>

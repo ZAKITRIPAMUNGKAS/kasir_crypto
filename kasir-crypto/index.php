@@ -7,13 +7,10 @@ if (!isset($_SESSION['login'])) {
     exit();
 }
 
-// Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_transaksi'])) {
-    // Begin transaction
     $conn->begin_transaction();
     
     try {
-        // Insert main transaction for each crypto
         foreach ($_POST['crypto'] as $item) {
             $total = $item['jumlah'] * $item['harga'];
             
@@ -23,24 +20,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_transaksi'])) 
             
             $transaksi_id = $conn->insert_id;
             
-            // Also insert into transaksi_item for detailed records
             $stmt_item = $conn->prepare("INSERT INTO transaksi_item (transaksi_id, nama_crypto, jumlah, harga) VALUES (?, ?, ?, ?)");
             $stmt_item->bind_param("isdd", $transaksi_id, $item['nama'], $item['jumlah'], $item['harga']);
             $stmt_item->execute();
         }
         
-        // Commit transaction
         $conn->commit();
         header("Location: index.php?success=1");
         exit();
     } catch (Exception $e) {
-        // Rollback on error
         $conn->rollback();
         die("Error: " . $e->getMessage());
     }
 }
 
-// Get all transactions
 $transaksi = $conn->query("SELECT * FROM transaksi ORDER BY tanggal DESC, id DESC");
 ?>
 
@@ -248,7 +241,6 @@ $transaksi = $conn->query("SELECT * FROM transaksi ORDER BY tanggal DESC, id DES
       width: 100%;
     }
 
-    /* Crypto items styles */
     .crypto-items {
       margin-top: 1.5rem;
     }
@@ -300,7 +292,6 @@ $transaksi = $conn->query("SELECT * FROM transaksi ORDER BY tanggal DESC, id DES
       font-size: 1.1rem;
     }
     
-    /* Table styles */
     .table-container {
       overflow-x: auto;
       border-radius: var(--radius);
@@ -455,7 +446,6 @@ $transaksi = $conn->query("SELECT * FROM transaksi ORDER BY tanggal DESC, id DES
       </div>
       
       <div class="crypto-items" id="cryptoItems">
-        <!-- Crypto items will be added here dynamically -->
       </div>
       
       <button type="button" class="add-item-btn" id="addCryptoItem">
