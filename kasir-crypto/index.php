@@ -7,24 +7,48 @@ if (!isset($_SESSION['login'])) {
     exit();
 }
 
+// Fetch crypto list from database
+$crypto_list = [];
+$result = $conn->query("SELECT nama_crypto, harga FROM gudang");
+while ($row = $result->fetch_assoc()) {
+    $crypto_list[$row['nama_crypto']] = $row['harga'];
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_transaksi'])) {
     $conn->begin_transaction();
     
     try {
         foreach ($_POST['crypto'] as $item) {
+            // Cek stok
+            $stmt_stok = $conn->prepare("SELECT stok FROM gudang WHERE nama_crypto = ?");
+            $stmt_stok->bind_param("s", $item['nama']);
+            $stmt_stok->execute();
+            $stmt_stok->bind_result($stok_tersedia);
+            $stmt_stok->fetch();
+            $stmt_stok->close();
+
+            if ($stok_tersedia < $item['jumlah']) {
+                throw new Exception("Stok {$item['nama']} tidak mencukupi. Tersedia: $stok_tersedia");
+            }
+
+            // Simpan ke transaksi
             $total = $item['jumlah'] * $item['harga'];
-            
             $stmt = $conn->prepare("INSERT INTO transaksi (nama_pengguna, nama_crypto, jumlah, harga, tanggal) VALUES (?, ?, ?, ?, ?)");
             $stmt->bind_param("ssdds", $_POST['nama_pengguna'], $item['nama'], $item['jumlah'], $item['harga'], $_POST['tanggal']);
             $stmt->execute();
-            
             $transaksi_id = $conn->insert_id;
-            
+
+            // Simpan ke transaksi_item
             $stmt_item = $conn->prepare("INSERT INTO transaksi_item (transaksi_id, nama_crypto, jumlah, harga) VALUES (?, ?, ?, ?)");
             $stmt_item->bind_param("isdd", $transaksi_id, $item['nama'], $item['jumlah'], $item['harga']);
             $stmt_item->execute();
+
+            // Kurangi stok
+            $stmt_update_stok = $conn->prepare("UPDATE gudang SET stok = stok - ? WHERE nama_crypto = ?");
+            $stmt_update_stok->bind_param("ds", $item['jumlah'], $item['nama']);
+            $stmt_update_stok->execute();
         }
-        
+
         $conn->commit();
         header("Location: index.php?success=1");
         exit();
@@ -44,363 +68,11 @@ $transaksi = $conn->query("SELECT * FROM transaksi ORDER BY tanggal DESC, id DES
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Kasir Crypto</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --primary: #6366f1;
-      --primary-dark: #4f46e5;
-      --primary-light: #a5b4fc;
-      --danger: #f43f5e;
-      --danger-dark: #e11d48;
-      --success: #10b981;
-      --success-dark: #059669;
-      --warning: #f59e0b;
-      --bg: #f8fafc;
-      --surface: #ffffff;
-      --text: #1e293b;
-      --text-light: #64748b;
-      --muted: #94a3b8;
-      --border: #e2e8f0;
-      --radius: 0.5rem;
-      --radius-lg: 0.75rem;
-      --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      --transition: all 0.2s ease;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .container {
-      flex: 1;
-      padding: 2rem;
-      max-width: 1400px;
-      margin: 0 auto;
-      width: 100%;
-    }
-
-    header {
-      background: var(--surface);
-      padding: 1.25rem 2rem;
-      box-shadow: var(--shadow);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 50;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .logo-icon {
-      background: var(--primary);
-      color: white;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-    }
-
-    .logo-text {
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: var(--primary-dark);
-    }
-
-    .user-menu {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .user-greeting {
-      color: var(--text-light);
-      font-size: 0.9rem;
-    }
-
-    .logout-btn {
-      background: var(--danger);
-      color: white;
-      padding: 0.5rem 1rem;
-      border-radius: var(--radius);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.85rem;
-      transition: var(--transition);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .logout-btn:hover {
-      background: var(--danger-dark);
-    }
-
-    .card {
-      background: var(--surface);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow);
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .card-title {
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-bottom: 1.25rem;
-      color: var(--primary-dark);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .card-title svg {
-      width: 1.1rem;
-      height: 1.1rem;
-    }
-
-    .form-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-    }
-
-    .form-group {
-      margin-bottom: 1rem;
-    }
-
-    .form-label {
-      display: block;
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: var(--text);
-      margin-bottom: 0.5rem;
-    }
-
-    .form-control {
-      width: 100%;
-      padding: 0.7rem 1rem;
-      font-size: 0.9rem;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--bg);
-      transition: var(--transition);
-    }
-
-    .form-control:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px var(--primary-light);
-      outline: none;
-      background: var(--surface);
-    }
-
-    .btn {
-      padding: 0.7rem 1.25rem;
-      font-size: 0.9rem;
-      border-radius: var(--radius);
-      font-weight: 600;
-      cursor: pointer;
-      transition: var(--transition);
-      border: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-    }
-
-    .btn-primary {
-      background: var(--primary);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-dark);
-    }
-
-    .btn-block {
-      width: 100%;
-    }
-
-    .crypto-items {
-      margin-top: 1.5rem;
-    }
-    
-    .crypto-item {
-      background: var(--bg);
-      border-radius: var(--radius);
-      padding: 1rem;
-      margin-bottom: 1rem;
-      border: 1px solid var(--border);
-      position: relative;
-    }
-    
-    .remove-item {
-      position: absolute;
-      top: -10px;
-      right: -10px;
-      background: var(--danger);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    
-    .add-item-btn {
-      background: var(--success);
-      color: white;
-      border: none;
-      border-radius: var(--radius);
-      padding: 0.6rem 1rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-top: 1rem;
-      font-size: 0.85rem;
-    }
-    
-    .total-display {
-      font-weight: bold;
-      margin-top: 1.5rem;
-      text-align: right;
-      font-size: 1.1rem;
-    }
-    
-    .table-container {
-      overflow-x: auto;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      margin-bottom: 1.5rem;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--surface);
-      font-size: 0.9rem;
-    }
-
-    thead {
-      background: var(--primary);
-      color: white;
-    }
-
-    th {
-      padding: 0.9rem 1rem;
-      text-align: left;
-      font-weight: 600;
-    }
-
-    td {
-      padding: 0.8rem 1rem;
-      border-bottom: 1px solid var(--border);
-    }
-
-    tr:last-child td {
-      border-bottom: none;
-    }
-
-    tr:hover td {
-      background: rgba(99, 102, 241, 0.05);
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 0.3rem 0.6rem;
-      border-radius: 9999px;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-
-    .badge-primary {
-      background: var(--primary-light);
-      color: var(--primary-dark);
-    }
-
-    .action-btns {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .action-btn {
-      padding: 0.4rem;
-      border-radius: var(--radius);
-      transition: var(--transition);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--text-light);
-    }
-
-    .action-btn:hover {
-      background: var(--bg);
-    }
-
-    .action-btn.edit {
-      color: var(--warning);
-    }
-
-    .action-btn.delete {
-      color: var(--danger);
-    }
-
-    .action-btn.nota {
-      color: var(--success);
-    }
-
-    footer {
-      background: var(--surface);
-      padding: 1.25rem;
-      text-align: center;
-      font-size: 0.85rem;
-      color: var(--text-light);
-      box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.1);
-    }
-
-    @media (max-width: 768px) {
-      .container {
-        padding: 1rem;
-      }
-      
-      header {
-        padding: 1rem;
-      }
-      
-      .card {
-        padding: 1.25rem;
-      }
-      
-      .form-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="assets/style.css" />
+  <script>
+    // Crypto price data from database
+    const hargaCrypto = <?php echo json_encode($crypto_list); ?>;
+  </script>
 </head>
 <body>
 
@@ -538,31 +210,24 @@ $transaksi = $conn->query("SELECT * FROM transaksi ORDER BY tanggal DESC, id DES
           <?php endwhile; ?>
         </tbody>
       </table>
+      <a href="gudang.php" class="menu-link" style="display: block; margin: 1rem 0; padding: 0.5rem 1rem; border-radius: 0.5rem; background: var(--primary-light); color: var(--primary-dark); text-decoration: none; font-weight: 500;">Gudang</a>
     </div>
   </div>
 </div>
 
 <footer>
-  &copy; <?= date('Y') ?> Kasir Crypto | Dibuat dengan ❤️
+  &copy; <?= date('Y') ?> Kasir Crypto
 </footer>
 
 <script>
-// Crypto price data
-const hargaCrypto = {
-  'Bitcoin': 65000.00,
-  'Ethereum': 3800.00,
-  'Solana': 150.00,
-  'BNB': 600.00,
-  'Cardano': 0.45,
-  'Ripple': 0.50,
-  'Dogecoin': 0.15
-};
-
-// Add new crypto item
 document.getElementById('addCryptoItem').addEventListener('click', function() {
   const cryptoItems = document.getElementById('cryptoItems');
-  const itemCount = cryptoItems.querySelectorAll('.crypto-item').length;
   const itemId = 'crypto_' + Date.now();
+  
+  let optionsHTML = '<option value="" disabled selected>Pilih Crypto</option>';
+  for (const crypto in hargaCrypto) {
+    optionsHTML += `<option value="${crypto}">${crypto}</option>`;
+  }
   
   const itemHTML = `
     <div class="crypto-item" id="${itemId}">
@@ -573,10 +238,7 @@ document.getElementById('addCryptoItem').addEventListener('click', function() {
         <div class="form-group">
           <label class="form-label">Jenis Crypto</label>
           <select name="crypto[${itemId}][nama]" class="form-control crypto-select" required onchange="updateHarga(this)">
-            <option value="" disabled selected>Pilih Crypto</option>
-            ${Object.keys(hargaCrypto).map(crypto => 
-              `<option value="${crypto}">${crypto}</option>`
-            ).join('')}
+            ${optionsHTML}
           </select>
         </div>
         
@@ -596,7 +258,6 @@ document.getElementById('addCryptoItem').addEventListener('click', function() {
   cryptoItems.insertAdjacentHTML('beforeend', itemHTML);
 });
 
-// Update price when crypto is selected
 function updateHarga(selectElement) {
   const cryptoName = selectElement.value;
   const hargaInput = selectElement.closest('.crypto-item').querySelector('.crypto-harga');
@@ -604,7 +265,6 @@ function updateHarga(selectElement) {
   calculateTotal();
 }
 
-// Calculate total transaction amount
 function calculateTotal() {
   let total = 0;
   document.querySelectorAll('.crypto-item').forEach(item => {
@@ -617,8 +277,10 @@ function calculateTotal() {
   document.getElementById('totalTransaksiInput').value = total.toFixed(2);
 }
 
-// Initialize with one crypto item
 document.addEventListener('DOMContentLoaded', function() {
+  // Set default tanggal ke hari ini
+  document.getElementById('tanggal').valueAsDate = new Date();
+  // Tambahkan item crypto pertama
   document.getElementById('addCryptoItem').click();
 });
 </script>

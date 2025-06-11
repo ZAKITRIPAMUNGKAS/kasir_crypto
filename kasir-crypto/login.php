@@ -5,9 +5,7 @@
     <meta charset="UTF-8">
     <title>Login Kasir Crypto</title>
     <style>
-/* assets/style.css */
 
-/* Root Variables */
 :root {
     --primary: #6366f1;
     --primary-dark: #4f46e5;
